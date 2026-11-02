@@ -1,10 +1,10 @@
 import type { Register } from 'claude-code'
 
 import { convertedPng } from './convert'
-import type { ConvertHost } from './convert'
-import { isMcpTool, mcpPngs } from './mcp'
+import { isMcpTool, mcpPictures } from './mcp'
 import { parsePng } from './png'
 import type { Png } from './png'
+import type { SavedHost } from './saved'
 
 // The ToolUse row is indented under its marker.
 const TOOL_INDENT = 7
@@ -28,11 +28,11 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {await next(e)}
-        {pngs.map(png => {
+        {pngs.map((png, index) => {
           const { columns, rows } = fitImage(png, width, e.viewport?.rows ?? 40)
 
           return (
-            <Box marginLeft={5} marginTop={1}>
+            <Box key={String(index)} marginLeft={5} marginTop={1}>
               <Image source={{ png: png.base64 }} columns={columns} rows={rows} alt={png.name} />
             </Box>
           )
@@ -42,9 +42,9 @@ export const register: Register = on => {
   })
 }
 
-/** The pictures a finished row draws: a Read's one image, converted when it is not a PNG, or an MCP call's PNG blocks. */
-async function drawablePngs($: ConvertHost, props: { tool: string; input: unknown; output?: unknown }): Promise<Png[]> {
-  if (isMcpTool(props.tool)) return mcpPngs(props.output, props.tool)
+/** The pictures a finished row draws: a Read's one image, converted when it is not a PNG, or an MCP call's PNG blocks and saved pictures. */
+async function drawablePngs($: SavedHost, props: { tool: string; input: unknown; output?: unknown }): Promise<Png[]> {
+  if (isMcpTool(props.tool)) return mcpPictures($, props.output, props.tool)
   if (props.tool !== 'Read') return []
   const png = parsePng(props.output, props.input) ?? (await convertedPng($, props.output, props.input))
 

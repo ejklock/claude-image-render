@@ -28,6 +28,11 @@ export async function convertedPng(host: ConvertHost, output: unknown, input: un
   const path = readPath(input)
   if (format === undefined || path === undefined) return undefined
 
+  return convertFile(host, format, path)
+}
+
+/** The file at `path`, a `jpeg`, `gif` or `webp`, converted to a PNG the Image element draws; nothing when it cannot be converted. */
+export async function convertFile(host: ConvertHost, format: string, path: string): Promise<Png | undefined> {
   let scratch: string | undefined
   try {
     scratch = await scratchPath(host)
