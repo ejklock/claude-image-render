@@ -1,0 +1,18 @@
+{
+  "name": "claude-image-render",
+  "version": "0.1.0",
+  "description": "Draws the images Claude Code reads inline in the terminal.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "validate": "claude plugin validate .",
+    "test": "claude plugin test ."
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
