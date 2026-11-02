@@ -9,10 +9,16 @@ export type Png = { base64: string; width: number; height: number; name: string 
 /** The PNG a finished Read returned, or nothing when the output is not a drawable PNG. */
 export function parsePng(output: unknown, input: unknown): Png | undefined {
   const base64 = pngBase64(output)
-  if (base64 === undefined || decodedSize(base64) > PNG_LIMIT) return undefined
+
+  return base64 === undefined ? undefined : readPng(base64, fileName(input))
+}
+
+/** The PNG held in `base64`, or nothing when it is over the size limit, lacks the signature or has no size. */
+export function readPng(base64: string, name: string): Png | undefined {
+  if (decodedSize(base64) > PNG_LIMIT) return undefined
   const size = pngSize(base64)
 
-  return size === undefined ? undefined : { base64, ...size, name: fileName(input) }
+  return size === undefined ? undefined : { base64, ...size, name }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
