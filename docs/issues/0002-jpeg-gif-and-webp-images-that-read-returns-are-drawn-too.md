@@ -2,7 +2,7 @@
 type: Issue
 title: JPEG, GIF and WebP images that Read returns are drawn too
 description: JPEG, GIF and WebP Read results are converted to PNG with sips or magick through $.process.run and drawn.
-status: in-progress
+status: closed
 blocked_by: [0001]
 timestamp: 2026-11-02T14:29:07Z
 ---
