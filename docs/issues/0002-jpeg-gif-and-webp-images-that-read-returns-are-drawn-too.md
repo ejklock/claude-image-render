@@ -35,3 +35,4 @@ timestamp: 2026-11-02T14:29:07Z
 - Tests: a JPEG, a GIF and a WebP Read each draw an `Image`; a conversion failure and a timeout each render what `next(e)` returns.
 - The gates of issue 0001 pass.
 - Demo: the owner asks the agent to Read a JPG photo inside herdr and sees it drawn.
+  - Shown on 2026-11-02 (Claude Code 2.1.314): a Read of an 83 KB JPEG in a herdr pane drew 13 rows of kitty placeholders under `Read image (81.1KB)` (`hc read`).
