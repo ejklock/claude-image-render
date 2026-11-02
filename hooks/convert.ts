@@ -1,6 +1,6 @@
 import type { Hook } from 'claude-code'
 
-import { readPng } from './png'
+import { isOversizeRead, readPng } from './png'
 import type { Png } from './png'
 
 type FullHost = Parameters<Hook<'ui.render'>>[0]
@@ -13,7 +13,7 @@ export type ConvertHost = {
   session: Pick<FullHost['session'], 'id'>
 }
 
-const MIME_FORMATS: Readonly<Record<string, string>> = { 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/webp': 'webp' }
+const MIME_FORMATS: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/gif': 'gif', 'image/webp': 'webp' }
 // Bounds the picture to what the terminal draws, and the PNG under the size `readPng` accepts.
 const LONGEST_SIDE = 1024
 const CONVERT_TIMEOUT_MS = 5000
@@ -22,16 +22,17 @@ const SCRATCH_FOLDER = 'image-render'
 // Keeps overlapping reads in this process from removing each other's files; the session id in the name does the same across sessions sharing a TMPDIR.
 let scratchCount = 0
 
-/** A JPEG, GIF or WebP a finished Read returned, converted to a PNG the Image element draws; nothing when it cannot be converted. */
+/** A JPEG, GIF or WebP, or a PNG over the size limit, that a finished Read returned, converted to a PNG the Image element draws; nothing when it cannot be converted. */
 export async function convertedPng(host: ConvertHost, output: unknown, input: unknown): Promise<Png | undefined> {
   const format = readFormat(output)
   const path = readPath(input)
   if (format === undefined || path === undefined) return undefined
+  if (format === 'png' && !isOversizeRead(output)) return undefined
 
   return convertFile(host, format, path)
 }
 
-/** The file at `path`, a `jpeg`, `gif` or `webp`, converted to a PNG the Image element draws; nothing when it cannot be converted. */
+/** The file at `path`, a `png`, `jpeg`, `gif` or `webp`, converted to a PNG the Image element draws; nothing when it cannot be converted. */
 export async function convertFile(host: ConvertHost, format: string, path: string): Promise<Png | undefined> {
   let scratch: string | undefined
   try {

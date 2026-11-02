@@ -21,6 +21,18 @@ export function readPng(base64: string, name: string): Png | undefined {
   return size === undefined ? undefined : { base64, ...size, name }
 }
 
+/** True when `base64` is a PNG by its header but over the size limit, so shrinking it could help; false for anything that is not a PNG. */
+export function isOversizePng(base64: string): boolean {
+  return decodedSize(base64) > PNG_LIMIT && pngSize(base64) !== undefined
+}
+
+/** True when a finished Read returned a PNG that is over the size limit. */
+export function isOversizeRead(output: unknown): boolean {
+  const base64 = pngBase64(output)
+
+  return base64 !== undefined && isOversizePng(base64)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

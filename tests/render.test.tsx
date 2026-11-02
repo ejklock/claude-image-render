@@ -957,7 +957,7 @@ test('pictures keep output order across bytes and files', async ($, on) => {
 
 test('a saved file that cannot be read is left out and the other pictures are drawn', async ($, on) => {
   const second = SAVED_DIR + '/probe-blob-2.png'
-  savedHost(on, { stat: { [CONFIG]: CONFIG, [SAVED]: SAVED, [second]: second }, files: { [SAVED]: new Error('EIO'), [second]: pngBase64(20, 20) } })
+  savedHost(on, { stat: { [CONFIG]: CONFIG, [SAVED]: SAVED, [second]: second }, files: { [SAVED]: new Error('EIO'), [second]: pngBase64(20, 20) }, sips: 1, magick: 1 })
   const ui = await mountRead($, on, mcpMounted(savedLine(SAVED) + '\n' + savedLine(second)))
 
   expect(await imageSources(ui)).toEqual([{ png: pngBase64(20, 20) }])
@@ -1061,8 +1061,6 @@ test('a PNG file with an upper case extension is drawn', async ($, on) => {
 
 const unreadable: Array<[string, NonNullable<HostAnswers['files']>]> = [
   ['without the PNG signature', { [SAVED]: base64Of(new Uint8Array(40)) }],
-  ['over 2 MiB', { [SAVED]: pngBase64(10, 10, 2097153) }],
-  ['that fs.read rejects', { [SAVED]: new Error('file too large') }],
 ]
 
 for (const [title, files] of unreadable) {
@@ -1156,4 +1154,169 @@ test('an image block whose bytes draw is followed by every saved line but the fi
 
   expect(await imageSources(ui)).toEqual([{ png: bytes }, { png: threeFiles.b }, { png: threeFiles.c }])
   expect(host.reads).toEqual([THREE[1], THREE[2]])
+})
+
+const OVER = 2097153
+const oversizeBase64 = (width = 4000, height = 3000, size = OVER) => pngBase64(width, height, size)
+const oversizeRead = (file_path = '/repo/full.png', width = 4000, height = 3000) => ({ input: { file_path }, output: imageOutput(oversizeBase64(width, height)) })
+const sipsPng = (path: string, scratch: string, shrink: string[]) => ['/usr/bin/sips', '-s', 'format', 'png', ...shrink, path, '--out', scratch]
+const magickPng = (path: string, scratch: string) => ['/usr/bin/env', 'magick', 'png:' + path + '[0]', '-resize', '1024x1024>', 'png:' + scratch]
+
+const oversizeSaved: Array<[string, NonNullable<HostAnswers['files']>]> = [
+  ['over 2 MiB decoded', { [SAVED]: oversizeBase64() }],
+  ['that fs.read rejects', { [SAVED]: new Error('file too large') }],
+]
+
+for (const [title, files] of oversizeSaved) {
+  test('a saved PNG ' + title + ' is shrunk by sips from its checked path and drawn', async ($, on) => {
+    const host = savedHost(on, { files, size: sizeLines(4000, 3000) })
+    const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+    const scratch = host.writes[0] ?? ''
+
+    expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+    expect(converterRuns(host)).toEqual([['/usr/bin/sips', '-g', 'pixelWidth', '-g', 'pixelHeight', SAVED], sipsPng(SAVED, scratch, ['-Z', '1024'])])
+    expect(host.reads).toEqual([SAVED, scratch])
+    expect(removals(host)).toEqual([['rm', '-f', scratch]])
+  })
+}
+
+for (const [title, files] of oversizeSaved) {
+  test('a saved PNG ' + title + ' named by an alias spelling is shrunk from its real path only', async ($, on) => {
+    const alias = '/alias/projects/p/s/tool-results/a.png'
+    const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [alias]: SAVED }, files, size: sizeLines(4000, 3000) })
+    const ui = await mountRead($, on, mcpMounted(savedLine(alias)))
+    const scratch = host.writes[0] ?? ''
+
+    expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+    expect(converterRuns(host)).toEqual([['/usr/bin/sips', '-g', 'pixelWidth', '-g', 'pixelHeight', SAVED], sipsPng(SAVED, scratch, ['-Z', '1024'])])
+    expect(host.reads).toEqual([SAVED, scratch])
+  })
+}
+
+test('a saved PNG over 2 MiB that is 1024x768 is converted without a shrink flag', async ($, on) => {
+  const host = savedHost(on, { files: { [SAVED]: oversizeBase64(1024, 768) }, size: sizeLines(1024, 768) })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  expect(await ui.findAll({ type: 'Image' })).toHaveLength(1)
+  expect(converterRuns(host)[1]).toEqual(sipsPng(SAVED, host.writes[0] ?? '', []))
+})
+
+test('a saved PNG over 2 MiB falls back to magick with the png prefix when sips fails', async ($, on) => {
+  const host = savedHost(on, { files: { [SAVED]: oversizeBase64() }, sips: 1 })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+  expect(converterRuns(host).at(-1)).toEqual(magickPng(SAVED, host.writes[0] ?? ''))
+})
+
+test('a saved PNG of exactly 2 MiB decoded is drawn from its bytes with no process', async ($, on) => {
+  const exact = oversizeBase64(300, 100, OVER - 1)
+  const host = savedHost(on, { files: { [SAVED]: exact } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  const drawn = (await imageSources(ui)).flatMap(source => (typeof source === 'object' && source !== null && 'png' in source && typeof source.png === 'string' ? [source.png.length] : []))
+
+  expect(drawn).toEqual([exact.length])
+  expect([...host]).toEqual([])
+})
+
+test('a saved PNG under the limit without the PNG signature is not converted', async ($, on) => {
+  const host = savedHost(on, { files: { [SAVED]: base64Of(new Uint8Array(40)) } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  expect(await ui.findAll({})).toHaveLength(1)
+  expect([...host]).toEqual([])
+})
+
+test('a saved PNG whose converted result is still over 2 MiB draws nothing while the other pictures of the row are drawn', async ($, on) => {
+  const [first, second, third] = THREE
+  const host = savedHost(on, {
+    stat: { [CONFIG]: CONFIG, ...Object.fromEntries(THREE.map(path => [path, path])) },
+    files: { [first ?? '']: oversizeBase64(), [second ?? '']: threeFiles.b, [third ?? '']: threeFiles.c },
+    scratch: oversizeBase64(),
+  })
+  const ui = await mountRead($, on, mcpMounted([threeLines()]))
+
+  expect(await imageSources(ui)).toEqual([{ png: threeFiles.b }, { png: threeFiles.c }])
+  expect(converterRuns(host).length).toBeGreaterThan(0)
+})
+
+test('a path outside the saved folders runs no process even when its PNG would be over 2 MiB', async ($, on) => {
+  const outside = '/elsewhere/big.png'
+  const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [outside]: outside }, files: { [outside]: oversizeBase64() } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(outside)))
+
+  expect(await ui.findAll({})).toHaveLength(1)
+  expect([...host]).toEqual([])
+})
+
+test('a PNG Read over 2 MiB is shrunk by sips from its file path and drawn under the engine row', async ($, on) => {
+  const runs = answerHost(on, { size: sizeLines(4000, 3000) })
+  const ui = await mountRead($, on, oversizeRead())
+  const drawn = (await ui.findAll({})).filter(node => node.type === 'Text' || node.type === 'Image')
+  const scratch = runs.writes[0] ?? ''
+
+  expect(drawn.map(node => node.type)).toEqual(['Text', 'Image'])
+  expect(drawn[1]?.props).toMatchObject({ source: { png: pngBase64(1600, 400) }, columns: 60, rows: 8 })
+  expect(converterRuns(runs)).toEqual([['/usr/bin/sips', '-g', 'pixelWidth', '-g', 'pixelHeight', '/repo/full.png'], sipsPng('/repo/full.png', scratch, ['-Z', '1024'])])
+  expect(runs.reads).toEqual([scratch])
+  expect(removals(runs)).toEqual([['rm', '-f', scratch]])
+})
+
+test('a PNG Read over 2 MiB falls back to magick with the png prefix when sips fails', async ($, on) => {
+  const runs = answerHost(on, { sips: 1 })
+  await mountRead($, on, oversizeRead())
+
+  expect(converterRuns(runs).at(-1)).toEqual(magickPng('/repo/full.png', runs.writes[0] ?? ''))
+})
+
+test('a PNG Read of exactly 2 MiB decoded is drawn from its bytes with no process', async ($, on) => {
+  const runs = answerHost(on)
+  const ui = await mountRead($, on, { output: imageOutput(pngBase64(10, 10, 2097152)) })
+
+  expect(await ui.findAll({ type: 'Image' })).toHaveLength(1)
+  expect(runs).toEqual([])
+})
+
+const oversizeNoProcess: Array<[string, Mounted]> = [
+  ['a relative file path', oversizeRead('full.png')],
+  ['no file path', { input: {}, output: oversizeRead().output }],
+  ['bytes over 2 MiB with no PNG signature', { output: imageOutput(base64Of(new Uint8Array(OVER))) }],
+  ['bytes under 2 MiB with no PNG signature', { output: imageOutput(base64Of(new Uint8Array(40))) }],
+  ['a PNG over 2 MiB off the terminal', { ...oversizeRead(), surface: 'desktop' }],
+]
+
+for (const [title, mounted] of oversizeNoProcess) {
+  test('a PNG Read with ' + title + ' runs no process', async ($, on) => {
+    const runs = answerHost(on)
+    const ui = await mountRead($, on, mounted)
+
+    expect(runs).toEqual([])
+    expect(runs.writes).toEqual([])
+    expect(await ui.findAll({ type: 'Image' })).toHaveLength(0)
+  })
+}
+
+test('a PNG Read over 2 MiB renders the engine row alone and removes its scratch when both converters fail', async ($, on) => {
+  const runs = answerHost(on, { sips: 1, magick: 1 })
+  const ui = await mountRead($, on, oversizeRead())
+  const drawn = await ui.findAll({})
+
+  expect(drawn).toHaveLength(1)
+  expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine row' })
+  expect(removals(runs)).toEqual([['rm', '-f', runs.writes[0] ?? '']])
+})
+
+test('a PNG Read over 2 MiB whose converted result is still over 2 MiB renders the engine row alone', async ($, on) => {
+  answerHost(on, { scratch: oversizeBase64() })
+  const ui = await mountRead($, on, oversizeRead())
+
+  expect(await ui.findAll({})).toHaveLength(1)
+})
+
+test('a PNG Read over 2 MiB whose path holds a glob character is never given to magick', async ($, on) => {
+  const runs = answerHost(on, { sips: 1 })
+  await mountRead($, on, oversizeRead('/repo/full[1].png'))
+
+  expect(converterRuns(runs).map(argv => argv[0])).toEqual(['/usr/bin/sips'])
 })
