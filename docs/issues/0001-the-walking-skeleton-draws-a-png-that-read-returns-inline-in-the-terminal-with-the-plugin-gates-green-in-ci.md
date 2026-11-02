@@ -2,7 +2,7 @@
 type: Issue
 title: The walking skeleton draws a PNG that Read returns inline in the terminal, with the plugin gates green in CI
 description: "Walking skeleton: the image-render plugin draws a PNG Read inline with ui.Image from a png source, with validate, test and se-gates green in CI."
-status: open
+status: closed
 timestamp: 2026-11-02T14:29:05Z
 ---
 

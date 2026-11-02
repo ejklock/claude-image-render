@@ -2,7 +2,7 @@
 type: Issue
 title: Screenshots that MCP tools return are drawn inline
 description: Image content that MCP tools return, such as browser screenshots, is drawn inline after the tool row.
-status: in-progress
+status: closed
 blocked_by: [0001, 0002]
 timestamp: 2026-11-02T14:29:08Z
 ---
