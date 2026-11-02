@@ -34,3 +34,4 @@ Browser and QA tools reached over MCP return screenshots as image content. These
 - Tests over the found shape: one and several image blocks, a text-only result left as it is.
 - The gates of issue 0001 pass.
 - Demo: a screenshot from a browser MCP tool, such as Playwright, is drawn inline inside herdr.
+  - Shown on 2026-11-02 (Claude Code 2.1.314, `@playwright/mcp` in local scope, a page served on `127.0.0.1`, since the server refuses `file:` URLs): `browser_take_screenshot` called directly drew one picture under its `[Image: source: …/tool-results/mcp-playwright-blob-….png]` line, and the same call inside `mcp__codemode__codemode` drew one from the saved file; `hc read` showed 17 rows of kitty placeholders under each, and the owner saw both drawn in a herdr pane.
