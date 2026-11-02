@@ -24,7 +24,9 @@ test('a finished Read mounted on the terminal renders what the engine draws', as
   })
 
   expect(await ui.find({ text: 'engine row' })).toBeDefined()
-  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  const drawn = await ui.findAll({})
+  expect(drawn).toHaveLength(1)
+  expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine row' })
 })
 
 test('a finished Bash mounted on the terminal renders what the engine draws', async ($, on) => {
@@ -49,5 +51,7 @@ test('a finished Bash mounted on the terminal renders what the engine draws', as
   })
 
   expect(await ui.find({ text: 'engine row' })).toBeDefined()
-  expect(await ui.find({ type: 'Image' })).toBeUndefined()
+  const drawn = await ui.findAll({})
+  expect(drawn).toHaveLength(1)
+  expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine row' })
 })
