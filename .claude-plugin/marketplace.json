@@ -1,0 +1,23 @@
+{
+  "name": "image-render",
+  "owner": {
+    "name": "Klock Tecnologia",
+    "email": "neto.nemesis@gmail.com"
+  },
+  "metadata": {
+    "description": "Draws the images Claude Code reads inline in the terminal."
+  },
+  "plugins": [
+    {
+      "name": "image-render",
+      "source": "./",
+      "description": "Draws the images Claude Code reads inline in the terminal.",
+      "category": "productivity",
+      "tags": [
+        "image",
+        "terminal",
+        "kitty-graphics"
+      ]
+    }
+  ]
+}

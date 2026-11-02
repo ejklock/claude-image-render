@@ -1,0 +1,22 @@
+{
+  "name": "image-render",
+  "version": "0.1.0",
+  "description": "Draws the images Claude Code reads inline in the terminal.",
+  "author": {
+    "name": "Klock Tecnologia",
+    "email": "neto.nemesis@gmail.com",
+    "url": "https://github.com/ejklock"
+  },
+  "homepage": "https://github.com/ejklock/claude-image-render",
+  "repository": "https://github.com/ejklock/claude-image-render",
+  "license": "MIT",
+  "icon": "assets/icon.png",
+  "keywords": [
+    "image",
+    "png",
+    "terminal",
+    "kitty-graphics",
+    "inline-images",
+    "read"
+  ]
+}
