@@ -32,7 +32,7 @@ Write an ADR only when a decision is expensive to reverse; every other decision 
 ## Hard rules
 
 1. **The mod only draws.** No hook rewrites a tool's output or input or the prompt: no `PostToolUse`, no `updatedToolOutput`, no `updatedMCPToolOutput`.
-2. **Draw from bytes, never a file name.** `ui.Image` gets a `{ png }` or `{ rgba }` source; herdr drops a `{ file }` picture (research 0001).
+2. **Draw from bytes, never a file name.** `ui.Image` gets a `{ png }` or `{ rgba }` source; herdr drops a `{ file }` picture (research 0001). Inside herdr the engine draws images only with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in its environment (issue 0001, Decision).
 3. **Where the terminal cannot draw, render exactly what `next(e)` returns.** No text fallback.
 4. **No network.** No image or any of its data leaves the machine.
 5. **The mods API is early access.** Read the type declarations the installed build writes under `.claude-plugin/types/` before using a call; never trust memory of the API.
