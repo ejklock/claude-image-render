@@ -1,7 +1,10 @@
 import type { Register } from 'claude-code'
 
 import { convertedPng } from './convert'
+import type { ConvertHost } from './convert'
+import { isMcpTool, mcpPngs } from './mcp'
 import { parsePng } from './png'
+import type { Png } from './png'
 
 // The ToolUse row is indented under its marker.
 const TOOL_INDENT = 7
@@ -15,23 +18,37 @@ export const register: Register = on => {
       return next(e)
     }
     const ui = $.ui.resolve(e)
-    if (e.props.tool !== 'Read' || !('Image' in ui)) return next(e)
-    const png = parsePng(e.props.output, e.props.input) ?? (await convertedPng($, e.props.output, e.props.input))
-    if (png === undefined) return next(e)
+    if (!('Image' in ui)) return next(e)
+    const pngs = await drawablePngs($, e.props)
+    if (pngs.length === 0) return next(e)
 
     const { Box, Image } = ui
     const width = Math.min(IMAGE_WIDTH, (e.viewport?.columns ?? 100) - TOOL_INDENT)
-    const { columns, rows } = fitImage(png, width, e.viewport?.rows ?? 40)
 
     return (
       <Box flexDirection="column">
         {await next(e)}
-        <Box marginLeft={5} marginTop={1}>
-          <Image source={{ png: png.base64 }} columns={columns} rows={rows} alt={png.name} />
-        </Box>
+        {pngs.map(png => {
+          const { columns, rows } = fitImage(png, width, e.viewport?.rows ?? 40)
+
+          return (
+            <Box marginLeft={5} marginTop={1}>
+              <Image source={{ png: png.base64 }} columns={columns} rows={rows} alt={png.name} />
+            </Box>
+          )
+        })}
       </Box>
     )
   })
+}
+
+/** The pictures a finished row draws: a Read's one image, converted when it is not a PNG, or an MCP call's PNG blocks. */
+async function drawablePngs($: ConvertHost, props: { tool: string; input: unknown; output?: unknown }): Promise<Png[]> {
+  if (isMcpTool(props.tool)) return mcpPngs(props.output, props.tool)
+  if (props.tool !== 'Read') return []
+  const png = parsePng(props.output, props.input) ?? (await convertedPng($, props.output, props.input))
+
+  return png === undefined ? [] : [png]
 }
 
 /** Fills the width it is given, shrinking to the terminal height; a cell is about twice as tall as it is wide. */
