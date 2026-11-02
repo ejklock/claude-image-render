@@ -2,7 +2,7 @@
 type: Issue
 title: Screenshots that MCP tools return are drawn inline
 description: Image content that MCP tools return, such as browser screenshots, is drawn inline after the tool row.
-status: open
+status: in-progress
 blocked_by: [0001, 0002]
 timestamp: 2026-11-02T14:29:08Z
 ---
@@ -23,7 +23,9 @@ Browser and QA tools reached over MCP return screenshots as image content. These
 
 - The shape, found on 2026-11-02 (Claude Code 2.1.314) by a probe MCP server returning one PNG, and a probe mod writing what its `ui.render` hook on `ToolUse` received. A direct `mcp__<server>__<tool>` call gets `output` as a bare array of blocks in the Anthropic API form, not the declared `McpToolResult`: `[{ type: "text", text }, { type: "image", source: { type: "base64", media_type: "image/png", data } }, { type: "text", text: "[Image: source: <CLAUDE_CONFIG_DIR>/projects/<project>/<session>/tool-results/<server>-blob-<n>.png]" }]`, the whole base64 in `data`. The same tool called through the codemode plugin is the `mcp__codemode__codemode` row, whose `output` is a string, `"shot\n[Image: source: <path>]"`: no image block, only the saved file.
 - Draw both, chosen by the owner: an image block's bytes, and a `[Image: source: <path>]` line whose path lies in Claude Code's own `tool-results` folders, `${CLAUDE_CONFIG_DIR ?? $HOME/.claude}/projects/<project>/<session>/tool-results/`. The engine wrote that file, so the plugin reads it as it reads a Read's file. Not taken: image blocks only, which leaves every codemode-routed screenshot undrawn. Cost: the `[Image: source: …]` text is the engine's, undocumented, and may change; a change leaves those rows as Claude Code draws them.
-- A path outside that folder, relative, or holding a `..` segment is never read.
+- A path outside that folder, relative, or holding a `..` segment is never read. The check runs on where the path lands, `$.fs.stat(path, { resolve: true }).realPath`, against the folder resolved the same way, as the API's own guard example does (`claude-code/index.d.ts`, `fs.stat`), so a symbolic link out of the folder is refused too.
+- In a direct call, a `[Image: source: …]` line in the text block right after an image block is that block's saved file: the block is drawn from its bytes when they are a PNG under the limit, and from the file otherwise, never both. A line with no image block before it, as in the codemode row, is a picture of its own. The saved file's format comes from its extension (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`); another extension is left undrawn.
+- Built in three slices, each on the one before: image blocks drawn from their bytes; saved files drawn and converted; a PNG over the limit shrunk, for MCP images and Reads.
 - A PNG over the 2 MiB `{ png }` limit, such as a full-page screenshot, is shrunk from its file through the converters of [issue 0002](/issues/0002-jpeg-gif-and-webp-images-that-read-returns-are-drawn-too.md) instead of being left undrawn: the saved file of an MCP image, and the `file_path` of a Read (owner's choice, 2026-11-02).
 
 ### Acceptance

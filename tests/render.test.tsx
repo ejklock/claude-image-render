@@ -710,3 +710,127 @@ test('a JPEG Read draws the engine row and no Image element when a plugin remove
   expect(await ui.find({ text: 'engine row' })).toBeDefined()
   expect(await ui.findAll({ type: 'Image' })).toEqual([])
 })
+
+const MCP_TOOL = 'mcp__probe__shot'
+const textBlock = (text: string) => ({ type: 'text', text })
+const imageBlock = (data: unknown, mediaType: unknown = 'image/png', sourceType: unknown = 'base64') => ({
+  type: 'image',
+  source: { type: sourceType, media_type: mediaType, data },
+})
+const mcpMounted = (output: unknown, more: Partial<Mounted> = {}): Mounted => ({ tool: MCP_TOOL, input: {}, output, ...more })
+const drawnNodes = async (ui: Awaited<ReturnType<typeof mountRead>>) =>
+  (await ui.findAll({})).filter(node => node.type === 'Text' || node.type === 'Image')
+
+test('an MCP tool call returning one PNG block draws the picture under the engine row fitted as a Read of the same size', async ($, on) => {
+  const base64 = pngBase64(1600, 400)
+  const probe = [textBlock('shot'), imageBlock(base64), textBlock('[Image: source: /cfg/projects/p/s/tool-results/probe-blob-1.png]')]
+  const ui = await mountRead($, on, mcpMounted(probe))
+  const drawn = await drawnNodes(ui)
+
+  expect(drawn.map(node => node.type)).toEqual(['Text', 'Image'])
+  expect(drawn[0]).toMatchObject({ text: 'engine row' })
+  expect(drawn[1]?.props).toMatchObject({ source: { png: base64 }, columns: 60, rows: 8 })
+  expect(String(drawn[1]?.props.alt)).toContain(MCP_TOOL)
+})
+
+test('an MCP tool call returning two PNG blocks draws two pictures in output order, each fitted from its own size', async ($, on) => {
+  const first = pngBase64(1600, 400)
+  const second = pngBase64(400, 1600)
+  const ui = await mountRead($, on, mcpMounted([imageBlock(first), textBlock('between'), imageBlock(second)]))
+  const images = await ui.findAll({ type: 'Image' })
+
+  expect(images.map(node => node.props.source)).toEqual([{ png: first }, { png: second }])
+  expect(images[0]?.props).toMatchObject({ columns: 60, rows: 8 })
+  expect(images[1]?.props).toMatchObject({ columns: 16, rows: 32 })
+  expect(images[0]?.props.alt).not.toEqual(images[1]?.props.alt)
+})
+
+test('an MCP image block after several text blocks is drawn', async ($, on) => {
+  const ui = await mountRead($, on, mcpMounted([textBlock('a'), textBlock('b'), textBlock('c'), imageBlock(pngBase64(10, 10))]))
+
+  expect(await ui.findAll({ type: 'Image' })).toHaveLength(1)
+})
+
+const undrawn: Array<[string, unknown]> = [
+  ['a text-only array', [textBlock('hello'), textBlock('[Image: source: /x/tool-results/a.png]')]],
+  ['an empty array', []],
+  ['a string output', 'shot\n[Image: source: /x/tool-results/a.png]'],
+  ['an object output with content', { content: [imageBlock(pngBase64(10, 10))] }],
+  ['a null output', null],
+  ['a JPEG media type', [imageBlock(pngBase64(10, 10), 'image/jpeg')]],
+  ['a null media type', [imageBlock(pngBase64(10, 10), null)]],
+  ['a url source', [imageBlock(pngBase64(10, 10), 'image/png', 'url')]],
+  ['a non-string data', [imageBlock(7)]],
+  ['an empty data', [imageBlock('')]],
+  ['data that is not base64', [imageBlock('!'.repeat(40))]],
+  ['data without the PNG signature', [imageBlock(base64Of(new Uint8Array(33)))]],
+  ['data over 2 MiB decoded', [imageBlock(pngBase64(10, 10, 2097153))]],
+  ['an image block with no source', [{ type: 'image' }]],
+  ['a null block', [null]],
+  ['a string block', ['image']],
+  ['a number block', [3]],
+]
+
+for (const [title, output] of undrawn) {
+  test('an MCP tool call with ' + title + ' renders the engine row alone', async ($, on) => {
+    const ui = await mountRead($, on, mcpMounted(output))
+    const drawn = await ui.findAll({})
+
+    expect(drawn).toHaveLength(1)
+    expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine row' })
+  })
+}
+
+test('an MCP array mixing drawable and undrawable blocks draws only the drawable ones', async ($, on) => {
+  const good = pngBase64(1600, 400)
+  const output = [null, imageBlock(good), 'x', imageBlock(pngBase64(10, 10), 'image/jpeg'), imageBlock(''), imageBlock(good)]
+  const ui = await mountRead($, on, mcpMounted(output))
+  const images = await ui.findAll({ type: 'Image' })
+
+  expect(images.map(node => node.props.source)).toEqual([{ png: good }, { png: good }])
+})
+
+test('a Bash tool call with the MCP probe output draws nothing added', async ($, on) => {
+  const ui = await mountRead($, on, { tool: 'Bash', input: {}, output: [imageBlock(pngBase64(10, 10))] })
+
+  expect(await ui.findAll({ type: 'Image' })).toEqual([])
+  expect(await ui.findAll({})).toHaveLength(1)
+})
+
+const mcpEngineRowOnly: Array<[string, Partial<Mounted>]> = [
+  ['a running', { state: { isRunning: true } }],
+  ['an errored', { state: { isErrored: true } }],
+  ['an interrupted', { state: { isInterrupted: true } }],
+  ['a desktop', { surface: 'desktop' }],
+]
+
+for (const [title, more] of mcpEngineRowOnly) {
+  test(title + ' MCP tool call with a PNG block renders the engine row alone', async ($, on) => {
+    const ui = await mountRead($, on, mcpMounted([imageBlock(pngBase64(10, 10))], more))
+    const drawn = await ui.findAll({})
+
+    expect(drawn).toHaveLength(1)
+    expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine row' })
+  })
+}
+
+test('an MCP picture narrows to the room a narrow terminal leaves', async ($, on) => {
+  const ui = await mountRead($, on, mcpMounted([imageBlock(pngBase64(1600, 400))], { viewport: { columns: 50, rows: 40 } }))
+  const image = await ui.find({ type: 'Image' })
+
+  expect(image?.props).toMatchObject({ columns: 43, rows: 5 })
+})
+
+test('an MCP tool call draws its pictures without any host call', async ($, on) => {
+  const calls: string[] = []
+  on('env.get', () => (calls.push('env.get'), { value: undefined }))
+  on('session.id', () => (calls.push('session.id'), { value: 'sess' }))
+  on('process.run', () => (calls.push('process.run'), ran(0)))
+  on('fs.read', () => (calls.push('fs.read'), { value: '' }))
+  on('fs.write', () => (calls.push('fs.write'), { value: undefined }))
+  on('fs.stat', () => (calls.push('fs.stat'), { value: {} as never }))
+  const ui = await mountRead($, on, mcpMounted([imageBlock(pngBase64(1600, 400)), imageBlock(pngBase64(10, 10), 'image/jpeg')]))
+
+  expect(await ui.findAll({ type: 'Image' })).toHaveLength(1)
+  expect(calls).toEqual([])
+})
