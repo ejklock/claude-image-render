@@ -2,7 +2,7 @@ import type { Hook } from 'claude-code'
 
 import { convertFile } from './convert'
 import type { ConvertHost } from './convert'
-import { readPng } from './png'
+import { isOversizePng, readPng } from './png'
 import type { Png } from './png'
 
 type FullHost = Parameters<Hook<'ui.render'>>[0]
@@ -26,7 +26,7 @@ export function savedPaths(text: string): string[] {
 
 /**
  * The picture saved at `path`, when it lies in Claude Code's own `tool-results` folders; nothing otherwise, and the file is then never read.
- * The extension picks the format: a PNG is read as it is, the others are converted.
+ * The extension picks the format: a PNG is read as it is, unless it is over the size limit, where it is shrunk; the others are converted.
  */
 export async function savedPng(host: SavedHost, path: string): Promise<Png | undefined> {
   const extension = /\.([^./]+)$/.exec(path)?.[1]?.toLowerCase()
@@ -36,9 +36,19 @@ export async function savedPng(host: SavedHost, path: string): Promise<Png | und
     const real = await insidePath(host, path)
     if (real === undefined) return undefined
     if (format !== undefined) return await convertFile(host, format, real)
-    const { base64 } = await host.fs.read(real, { as: 'bytes' })
+    const base64 = await readBytes(host, real)
+    if (base64 === undefined || isOversizePng(base64)) return await convertFile(host, 'png', real)
 
     return readPng(base64, real.slice(real.lastIndexOf('/') + 1))
+  } catch {
+    return undefined
+  }
+}
+
+/** The file's bytes, or nothing when the host refuses the read for any reason (past its own size limit, EIO, EACCES); the file then goes to the converters. */
+async function readBytes(host: SavedHost, path: string): Promise<string | undefined> {
+  try {
+    return (await host.fs.read(path, { as: 'bytes' })).base64
   } catch {
     return undefined
   }

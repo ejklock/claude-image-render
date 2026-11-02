@@ -42,7 +42,7 @@ export const register: Register = on => {
   })
 }
 
-/** The pictures a finished row draws: a Read's one image, converted when it is not a PNG, or an MCP call's PNG blocks and saved pictures. */
+/** The pictures a finished row draws: a Read's one image, converted when it is not a PNG or is over the size limit, or an MCP call's PNG blocks and saved pictures. */
 async function drawablePngs($: SavedHost, props: { tool: string; input: unknown; output?: unknown }): Promise<Png[]> {
   if (isMcpTool(props.tool)) return mcpPictures($, props.output, props.tool)
   if (props.tool !== 'Read') return []
