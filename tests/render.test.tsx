@@ -110,10 +110,11 @@ async function mountRead($: Engine, on: Parameters<TestBody>[1], mounted: Mounte
 const imageOutput = (base64: string, type = 'image/png') => ({ type: 'image', file: { base64, type, originalSize: 1 } })
 
 const sizes: Array<[string, number, number, number, number]> = [
-  ['a wide picture fills the width', 1600, 400, 113, 14],
+  ['a wide picture is drawn 60 columns wide', 1600, 400, 60, 8],
   ['a tall picture shrinks to the row cap', 400, 1600, 16, 32],
-  ['a picture exactly at the row cap keeps the full width', 1130, 640, 113, 32],
-  ['a picture just above the row cap narrows', 1130, 650, 111, 32],
+  ['a picture exactly at the row cap keeps the full width', 600, 640, 60, 32],
+  ['a picture just above the row cap narrows', 600, 650, 59, 32],
+  ['a picture keeps its aspect at 60 columns', 1130, 640, 60, 17],
 ]
 
 for (const [title, width, height, columns, rows] of sizes) {
@@ -129,12 +130,27 @@ for (const [title, width, height, columns, rows] of sizes) {
   })
 }
 
-test('a PNG Read with no viewport sizes the picture for 100 columns', async ($, on) => {
+test('a PNG Read with no viewport draws the picture 60 columns wide', async ($, on) => {
   const ui = await mountRead($, on, { output: imageOutput(pngBase64(100, 40)), viewport: undefined })
   const image = await ui.find({ type: 'Image' })
 
-  expect(image?.props).toMatchObject({ columns: 93, rows: 19 })
+  expect(image?.props).toMatchObject({ columns: 60, rows: 12 })
 })
+
+const narrow: Array<[string, number, number, number]> = [
+  ['a viewport leaving exactly 60 columns', 67, 60, 8],
+  ['a viewport leaving 59 columns', 66, 59, 7],
+  ['a 50-column viewport', 50, 43, 5],
+]
+
+for (const [title, viewportColumns, columns, rows] of narrow) {
+  test('a PNG Read narrows the picture to the room the terminal leaves: ' + title, async ($, on) => {
+    const ui = await mountRead($, on, { output: imageOutput(pngBase64(1600, 400)), viewport: { columns: viewportColumns, rows: 40 } })
+    const image = await ui.find({ type: 'Image' })
+
+    expect(image?.props).toMatchObject({ columns, rows })
+  })
+}
 
 const engineRowOnly: Array<[string, Mounted]> = [
   ['a JPEG Read', { output: imageOutput(pngBase64(10, 10), 'image/jpeg') }],
