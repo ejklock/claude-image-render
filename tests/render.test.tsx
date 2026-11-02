@@ -251,6 +251,9 @@ type HostAnswers = {
   scratch?: string | Error
   removal?: Error
   write?: Error
+  vars?: Record<string, string | Error>
+  stat?: Record<string, string | null | Error>
+  files?: Record<string, string | Error>
 }
 
 function runAnswer(given: Answer | undefined, stdout = '') {
@@ -273,17 +276,35 @@ function runnerOf(answers: HostAnswers, argv: readonly string[]) {
   return runAnswer(argv[0] === '/usr/bin/sips' ? answers.sips : answers.magick)
 }
 
+/** Stubs `env.get` and `fs.stat`; answers the paths asked of `fs.stat` in the list it returns. */
+function answerEnvironment(on: Parameters<TestBody>[1], answers: HostAnswers) {
+  const stats: string[] = []
+  on('env.get', (_, { name }) => {
+    if (answers.env !== undefined) throw answers.env
+    const given = answers.vars?.[name]
+    if (given instanceof Error) throw given
+
+    return { value: name === 'TMPDIR' ? answers.tmp : given }
+  })
+  on('fs.stat', (_, { path, resolve }) => {
+    stats.push(path)
+    const given = answers.stat?.[path]
+    if (given === undefined || given instanceof Error) throw given ?? new Error('ENOENT: ' + path)
+    expect(resolve).toBe(true)
+
+    return { value: { kind: 'file', size: 1, mtimeMs: 0, isLink: false, ...(given === null ? {} : { realPath: given }) } }
+  })
+
+  return stats
+}
+
 /** Stubs the host: converters answer as told, `fs.read` answers the scratch, every run, write and read is recorded. */
 function answerHost(on: Parameters<TestBody>[1], answers: HostAnswers = {}) {
   const runs: string[][] = []
   const reads: string[] = []
   const writes: string[] = []
   const limits: Array<number | undefined> = []
-  on('env.get', () => {
-    if (answers.env !== undefined) throw answers.env
-
-    return { value: answers.tmp }
-  })
+  const stats = answerEnvironment(on, answers)
   on('session.id', () => {
     if (answers.session !== undefined) throw answers.session
 
@@ -297,6 +318,9 @@ function answerHost(on: Parameters<TestBody>[1], answers: HostAnswers = {}) {
   })
   on('fs.read', (_, { path }) => {
     reads.push(path)
+    const file = answers.files?.[path]
+    if (file instanceof Error) throw file
+    if (file !== undefined) return { value: { base64: file } }
     if (answers.scratch instanceof Error) throw answers.scratch
 
     return { value: { base64: answers.scratch ?? pngBase64(1600, 400) } }
@@ -308,7 +332,7 @@ function answerHost(on: Parameters<TestBody>[1], answers: HostAnswers = {}) {
     return runnerOf(answers, argv)
   })
 
-  return Object.assign(runs, { reads, writes, limits })
+  return Object.assign(runs, { reads, writes, limits, stats })
 }
 
 const converterRuns = (runs: string[][]) => runs.filter(argv => argv[0] !== 'rm')
@@ -833,4 +857,303 @@ test('an MCP tool call draws its pictures without any host call', async ($, on) 
 
   expect(await ui.findAll({ type: 'Image' })).toHaveLength(1)
   expect(calls).toEqual([])
+})
+const CONFIG = '/cfg'
+const SAVED_DIR = '/cfg/projects/p/s/tool-results'
+const SAVED = SAVED_DIR + '/probe-blob-1.png'
+const savedLine = (path: string) => '[Image: source: ' + path + ']'
+const savedHost = (on: Parameters<TestBody>[1], answers: HostAnswers = {}) =>
+  answerHost(on, { vars: { CLAUDE_CONFIG_DIR: CONFIG }, stat: { [CONFIG]: CONFIG, [SAVED]: SAVED }, files: { [SAVED]: pngBase64(300, 100) }, ...answers })
+const imageSources = async (ui: Awaited<ReturnType<typeof mountRead>>) => (await ui.findAll({ type: 'Image' })).map(node => node.props.source)
+
+test('a direct MCP image block drawn from its bytes never touches its saved file', async ($, on) => {
+  const host = savedHost(on)
+  const bytes = pngBase64(1600, 400)
+  const ui = await mountRead($, on, mcpMounted([textBlock('shot'), imageBlock(bytes), textBlock(savedLine(SAVED))]))
+
+  expect(await imageSources(ui)).toEqual([{ png: bytes }])
+  expect([host.reads, [...host], host.stats]).toEqual([[], [], []])
+})
+
+test('an MCP image block with a JPEG media type is drawn from its saved PNG file', async ($, on) => {
+  const host = savedHost(on)
+  const ui = await mountRead($, on, mcpMounted([textBlock('shot'), imageBlock(pngBase64(10, 10), 'image/jpeg'), textBlock(savedLine(SAVED))]))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }])
+  expect(host.reads).toEqual([SAVED])
+})
+
+test('an MCP image block with a JPEG media type is drawn from its converted saved JPEG file', async ($, on) => {
+  const jpg = SAVED_DIR + '/probe-blob-2.jpg'
+  const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [jpg]: jpg } })
+  const ui = await mountRead($, on, mcpMounted([imageBlock(pngBase64(10, 10), 'image/jpeg'), textBlock(savedLine(jpg))]))
+  const scratch = host.writes[0] ?? ''
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+  expect(converterRuns(host)[1]).toEqual(['/usr/bin/sips', '-s', 'format', 'png', '-Z', '1024', jpg, '--out', scratch])
+})
+
+const bytesNotDrawn: Array<[string, unknown]> = [
+  ['over 2 MiB', imageBlock(pngBase64(10, 10, 2097153))],
+  ['not base64', imageBlock('!'.repeat(40))],
+  ['without the PNG signature', imageBlock(base64Of(new Uint8Array(33)))],
+]
+
+for (const [title, block] of bytesNotDrawn) {
+  test('an MCP image block with bytes ' + title + ' is drawn from its saved file', async ($, on) => {
+    const host = savedHost(on)
+    const ui = await mountRead($, on, mcpMounted([block, textBlock(savedLine(SAVED))]))
+
+    expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }])
+    expect(host.reads).toEqual([SAVED])
+  })
+}
+
+test('a codemode string output naming a saved file draws that file', async ($, on) => {
+  const host = savedHost(on)
+  const ui = await mountRead($, on, { tool: 'mcp__codemode__codemode', input: {}, output: 'shot\n' + savedLine(SAVED) })
+  const drawn = await drawnNodes(ui)
+
+  expect(drawn.map(node => node.type)).toEqual(['Text', 'Image'])
+  expect(drawn[1]?.props).toMatchObject({ source: { png: pngBase64(300, 100) }, columns: 60, rows: 10 })
+  expect(String(drawn[1]?.props.alt)).toContain('probe-blob-1.png')
+  expect(host.reads).toEqual([SAVED])
+})
+
+test('a string output with two saved lines draws two pictures in order', async ($, on) => {
+  const second = SAVED_DIR + '/probe-blob-2.png'
+  savedHost(on, { stat: { [CONFIG]: CONFIG, [SAVED]: SAVED, [second]: second }, files: { [SAVED]: pngBase64(300, 100), [second]: pngBase64(100, 300) } })
+  const ui = await mountRead($, on, mcpMounted('a\n' + savedLine(SAVED) + '\nb\n' + savedLine(second)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }, { png: pngBase64(100, 300) }])
+})
+
+test('a saved line in a text block that follows no image block is a picture of its own', async ($, on) => {
+  savedHost(on)
+  const ui = await mountRead($, on, mcpMounted([textBlock('a'), textBlock(savedLine(SAVED)), textBlock('b')]))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }])
+})
+
+test('a saved line after a text block that follows an image block is a picture of its own', async ($, on) => {
+  savedHost(on)
+  const bytes = pngBase64(1600, 400)
+  const ui = await mountRead($, on, mcpMounted([imageBlock(bytes), textBlock('between'), textBlock(savedLine(SAVED))]))
+
+  expect(await imageSources(ui)).toEqual([{ png: bytes }, { png: pngBase64(300, 100) }])
+})
+
+test('pictures keep output order across bytes and files', async ($, on) => {
+  const second = SAVED_DIR + '/probe-blob-2.png'
+  const third = SAVED_DIR + '/probe-blob-3.png'
+  const [a, b, c, d] = [pngBase64(10, 10), pngBase64(20, 20), pngBase64(30, 30), pngBase64(40, 40)]
+  const stat = { [CONFIG]: CONFIG, [SAVED]: SAVED, [second]: second, [third]: third }
+  savedHost(on, { stat, files: { [SAVED]: a, [second]: b, [third]: c } })
+  const output = [imageBlock(d), textBlock(savedLine(SAVED)), textBlock(savedLine(second)), imageBlock(pngBase64(10, 10), 'image/jpeg'), textBlock(savedLine(third))]
+  const ui = await mountRead($, on, mcpMounted(output))
+
+  expect(await imageSources(ui)).toEqual([{ png: d }, { png: b }, { png: c }])
+})
+
+test('a saved file that cannot be read is left out and the other pictures are drawn', async ($, on) => {
+  const second = SAVED_DIR + '/probe-blob-2.png'
+  savedHost(on, { stat: { [CONFIG]: CONFIG, [SAVED]: SAVED, [second]: second }, files: { [SAVED]: new Error('EIO'), [second]: pngBase64(20, 20) } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED) + '\n' + savedLine(second)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(20, 20) }])
+})
+
+test('a saved line in a Bash tool output adds nothing and touches no file', async ($, on) => {
+  const host = savedHost(on)
+  const ui = await mountRead($, on, { tool: 'Bash', input: {}, output: savedLine(SAVED) })
+
+  expect(await ui.findAll({ type: 'Image' })).toEqual([])
+  expect([host.reads, host.stats]).toEqual([[], []])
+})
+
+test('a saved line on a desktop surface touches no file', async ($, on) => {
+  const host = savedHost(on)
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED), { surface: 'desktop' }))
+
+  expect(await ui.findAll({ type: 'Image' })).toEqual([])
+  expect([host.reads, host.stats]).toEqual([[], []])
+})
+
+// The host hands `fs.stat` the normalized path, so a spelling with dots or doubled slashes is observable only as the path it collapses to.
+const NORMALIZED = SAVED_DIR + '/a.png'
+const collapsesInside: HostAnswers = { stat: { [CONFIG]: CONFIG, [NORMALIZED]: SAVED } }
+const itself = (path: string): HostAnswers => ({ stat: { [CONFIG]: CONFIG, [path]: path } })
+
+const refused: Array<[string, string, HostAnswers]> = [
+  ['a relative path', 'projects/p/s/tool-results/a.png', {}],
+  ['a dot-dot segment that resolves inside', SAVED_DIR + '/../tool-results/a.png', collapsesInside],
+  ['a dot segment that resolves inside', SAVED_DIR + '/./a.png', collapsesInside],
+  ['an empty segment that resolves inside', SAVED_DIR + '//a.png', collapsesInside],
+  ['another root', '/other/projects/p/s/tool-results/a.png', itself('/other/projects/p/s/tool-results/a.png')],
+  ['a wrong first segment under the root', '/cfg/other/p/s/tool-results/a.png', itself('/cfg/other/p/s/tool-results/a.png')],
+  ['a session folder but not tool-results', '/cfg/projects/p/s/a.png', itself('/cfg/projects/p/s/a.png')],
+  ['a session subfolder other than tool-results', '/cfg/projects/p/s/other/a.png', itself('/cfg/projects/p/s/other/a.png')],
+  ['a folder below tool-results', SAVED_DIR + '/deeper/a.png', itself(SAVED_DIR + '/deeper/a.png')],
+  ['a project folder directly', '/cfg/projects/p/tool-results/a.png', itself('/cfg/projects/p/tool-results/a.png')],
+  ['a symbolic link that lands outside', SAVED, { stat: { [CONFIG]: CONFIG, [SAVED]: '/etc/hosts.png' } }],
+  ['a link that lands in a sibling folder sharing the root prefix', SAVED, { stat: { [CONFIG]: CONFIG, [SAVED]: '/cfg-evil/projects/p/s/tool-results/probe-blob-1.png' } }],
+  ['a link that lands in a folder whose name only starts with the root', SAVED, { stat: { [CONFIG]: CONFIG, [SAVED]: '/cfgXprojects/p/s/tool-results/f.png' } }],
+  ['no realPath', SAVED, { stat: { [CONFIG]: CONFIG, [SAVED]: null } }],
+  ['a stat that rejects for the file', SAVED, { stat: { [CONFIG]: CONFIG, [SAVED]: new Error('EACCES') } }],
+  ['a stat that rejects for the root', SAVED, { stat: { [CONFIG]: new Error('EACCES'), [SAVED]: SAVED } }],
+  ['a missing file', SAVED, { stat: { [CONFIG]: CONFIG } }],
+  ['an env.get that rejects', SAVED, { vars: { CLAUDE_CONFIG_DIR: new Error('denied') } }],
+  ['no config dir and no home', SAVED, { vars: {} }],
+]
+
+for (const [title, path, answers] of refused) {
+  test('a saved line naming ' + title + ' is never read', async ($, on) => {
+    const host = savedHost(on, answers)
+    const ui = await mountRead($, on, mcpMounted('shot\n' + savedLine(path)))
+
+    expect(await ui.findAll({})).toHaveLength(1)
+    expect([host.reads, [...host]]).toEqual([[], []])
+  })
+}
+
+test('the folder root falls back to the home folder .claude when no config dir is set', async ($, on) => {
+  const home = '/home/me/.claude/projects/p/s/tool-results/a.png'
+  const host = savedHost(on, { vars: { HOME: '/home/me' }, stat: { '/home/me/.claude': '/home/me/.claude', [home]: home }, files: { [home]: pngBase64(20, 20) } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(home)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(20, 20) }])
+  expect(host.reads).toEqual([home])
+})
+
+test('a config dir spelled with a trailing slash still draws a saved file', async ($, on) => {
+  const host = savedHost(on, { vars: { CLAUDE_CONFIG_DIR: '/cfg/' } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }])
+  expect(host.reads).toEqual([SAVED])
+})
+
+test('a path whose spelling is outside but whose realPath is inside is read from its realPath', async ($, on) => {
+  const alias = '/alias/projects/p/s/tool-results/a.png'
+  const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [alias]: SAVED } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(alias)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(300, 100) }])
+  expect(host.reads).toEqual([SAVED])
+})
+
+test('a root whose realPath differs from its spelling guards by the realPath', async ($, on) => {
+  const real = '/real/cfg/projects/p/s/tool-results/probe-blob-1.png'
+  const host = savedHost(on, { stat: { [CONFIG]: '/real/cfg', [SAVED]: real }, files: { [real]: pngBase64(20, 20) } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(20, 20) }])
+  expect(host.reads).toEqual([real])
+})
+
+test('a PNG file with an upper case extension is drawn', async ($, on) => {
+  const upper = SAVED_DIR + '/a.PNG'
+  savedHost(on, { stat: { [CONFIG]: CONFIG, [upper]: upper }, files: { [upper]: pngBase64(20, 20) } })
+  const ui = await mountRead($, on, mcpMounted(savedLine(upper)))
+
+  expect(await imageSources(ui)).toEqual([{ png: pngBase64(20, 20) }])
+})
+
+const unreadable: Array<[string, NonNullable<HostAnswers['files']>]> = [
+  ['without the PNG signature', { [SAVED]: base64Of(new Uint8Array(40)) }],
+  ['over 2 MiB', { [SAVED]: pngBase64(10, 10, 2097153) }],
+  ['that fs.read rejects', { [SAVED]: new Error('file too large') }],
+]
+
+for (const [title, files] of unreadable) {
+  test('a saved PNG ' + title + ' is left undrawn', async ($, on) => {
+    const host = savedHost(on, { files })
+    const ui = await mountRead($, on, mcpMounted(savedLine(SAVED)))
+
+    expect(await ui.findAll({})).toHaveLength(1)
+    expect(host.reads).toEqual([SAVED])
+    expect([...host]).toEqual([])
+  })
+}
+
+for (const path of [SAVED_DIR + '/a.txt', SAVED_DIR + '/a', SAVED_DIR + '/a.png.txt']) {
+  test('a saved file named ' + path.split('/').pop() + ' is neither stat-ed nor read', async ($, on) => {
+    const host = savedHost(on)
+    const ui = await mountRead($, on, mcpMounted(savedLine(path)))
+
+    expect(await ui.findAll({})).toHaveLength(1)
+    expect([host.reads, host.stats, [...host]]).toEqual([[], [], []])
+  })
+}
+
+const savedFormats: Array<[string, string, string]> = [
+  ['jpg', 'jpeg', 'jpeg:'],
+  ['JPEG', 'jpeg', 'jpeg:'],
+  ['gif', 'gif', 'gif:'],
+  ['webp', 'webp', 'webp:'],
+]
+
+for (const [extension, , prefix] of savedFormats) {
+  test('a saved .' + extension + ' file is converted by sips and drawn', async ($, on) => {
+    const path = SAVED_DIR + '/a.' + extension
+    const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [path]: path } })
+    const ui = await mountRead($, on, mcpMounted(savedLine(path)))
+    const scratch = host.writes[0] ?? ''
+
+    expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+    expect(converterRuns(host)).toEqual([
+      ['/usr/bin/sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path],
+      ['/usr/bin/sips', '-s', 'format', 'png', '-Z', '1024', path, '--out', scratch],
+    ])
+  })
+
+  test('a saved .' + extension + ' file falls back to magick with the ' + prefix + ' prefix', async ($, on) => {
+    const path = SAVED_DIR + '/a.' + extension
+    const host = savedHost(on, { stat: { [CONFIG]: CONFIG, [path]: path }, sips: 1 })
+    const ui = await mountRead($, on, mcpMounted(savedLine(path)))
+    const scratch = host.writes[0] ?? ''
+
+    expect(await imageSources(ui)).toEqual([{ png: pngBase64(1600, 400) }])
+    expect(converterRuns(host).at(-1)).toEqual(['/usr/bin/env', 'magick', prefix + path + '[0]', '-resize', '1024x1024>', 'png:' + scratch])
+  })
+}
+
+test('a saved JPEG that neither converter converts is left out', async ($, on) => {
+  const path = SAVED_DIR + '/a.jpg'
+  savedHost(on, { stat: { [CONFIG]: CONFIG, [path]: path }, sips: 1, magick: 1 })
+  const ui = await mountRead($, on, mcpMounted(savedLine(path)))
+
+  expect(await ui.findAll({})).toHaveLength(1)
+})
+
+test('a document block holding a valid PNG source draws nothing', async ($, on) => {
+  const ui = await mountRead($, on, mcpMounted([{ type: 'document', source: { type: 'base64', media_type: 'image/png', data: pngBase64(10, 10) } }]))
+
+  expect(await ui.findAll({})).toHaveLength(1)
+})
+
+const THREE = ['a', 'b', 'c'].map(name => SAVED_DIR + '/' + name + '.png')
+const threeFiles = { a: pngBase64(10, 10), b: pngBase64(20, 20), c: pngBase64(30, 30) }
+const threeHost = (on: Parameters<TestBody>[1]) =>
+  savedHost(on, {
+    stat: { [CONFIG]: CONFIG, ...Object.fromEntries(THREE.map(path => [path, path])) },
+    files: Object.fromEntries(THREE.map((path, index) => [path, [threeFiles.a, threeFiles.b, threeFiles.c][index] ?? ''])),
+  })
+const threeLines = () => textBlock(THREE.map(savedLine).join('\n'))
+
+test('an image block whose bytes do not draw takes its first saved line as its file and draws every further line after it', async ($, on) => {
+  const host = threeHost(on)
+  const ui = await mountRead($, on, mcpMounted([imageBlock('!'.repeat(40)), threeLines()]))
+
+  expect(await imageSources(ui)).toEqual([{ png: threeFiles.a }, { png: threeFiles.b }, { png: threeFiles.c }])
+  expect(host.reads).toEqual(THREE)
+})
+
+test('an image block whose bytes draw is followed by every saved line but the first, each drawn in order', async ($, on) => {
+  const host = threeHost(on)
+  const bytes = pngBase64(1600, 400)
+  const ui = await mountRead($, on, mcpMounted([imageBlock(bytes), threeLines()]))
+
+  expect(await imageSources(ui)).toEqual([{ png: bytes }, { png: threeFiles.b }, { png: threeFiles.c }])
+  expect(host.reads).toEqual([THREE[1], THREE[2]])
 })
