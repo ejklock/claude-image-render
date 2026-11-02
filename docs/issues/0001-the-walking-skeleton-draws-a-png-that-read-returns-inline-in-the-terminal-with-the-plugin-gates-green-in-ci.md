@@ -23,10 +23,12 @@ The first slice and the tracer bullet: a `Read` of a PNG shows the picture right
 
 - Draw from a `{ png: base64 }` source taken from the Read output, not `{ file }`: herdr forwards kitty images sent as direct data and drops a file path ([research 0001](/research/0001-drawing-the-images-claude-code-reads-inline-in-ghostty-inside-herdr.md), F10 and F11). Not taken: `{ file: path }`, which would avoid holding the bytes.
 - Keep the engine's Read row and add the picture after it, rather than replacing the row: the owner still sees what was read.
+- Inside herdr the engine turns kitty graphics off by itself: herdr answers the graphics probe but identifies as `libghostty` in XTVERSION, so every `Image` draws only its alt. `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` in the environment turns it on (Claude Code 2.1.314, herdr 0.9.5; found by the claude-code-mermaid-render session from `claude --debug-file` logs: `kittyGraphics=no` without it, `kittyGraphics=yes` with it). The plugin cannot set it; the README tells the user to, and the demo runs with it. Not taken: detecting herdr in the plugin and drawing anyway, which the engine does not allow.
 
 ### Acceptance
 
 - Tests: a PNG Read draws one `Image` whose source is the output's base64 and whose size follows the fit rule, with cases for a wide and a tall picture capped by the viewport; a JPEG Read, a running, failed or interrupted Read, a non-Read tool, another surface and an over-limit PNG each render exactly what `next(e)` returns.
 - No hook of the plugin rewrites a tool's output or input: the module registers no `PostToolUse` and returns no `updatedToolOutput` (constitution).
 - `claude plugin validate .`, `claude plugin test .` and `se-gates check` pass locally and in CI.
-- Demo, run by the owner: in a herdr pane, `claude-klock --plugin-dir <repo>`, ask the agent to Read a PNG; the picture is drawn under the Read row.
+- The README says that inside herdr Claude Code needs `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` to draw images.
+- Demo, run by the owner: in a herdr pane, `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1 claude-klock --plugin-dir <repo>`, ask the agent to Read a PNG; the picture is drawn under the Read row.
