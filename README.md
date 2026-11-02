@@ -2,7 +2,7 @@
 
 A Claude Code mod that draws the images Claude Code reads inline in the terminal transcript, using the mods API's `ui.Image` on terminals that speak the kitty graphics protocol (Ghostty, kitty, WezTerm).
 
-Status: PNG images that `Read` returns are drawn inline, under Claude Code's own `Read` row, 60 columns wide (narrower on a narrow terminal), on kitty-graphics terminals. Other files and other tools render exactly what Claude Code draws.
+Status: PNG, JPEG, GIF and WebP images that `Read` returns are drawn inline, under Claude Code's own `Read` row, 60 columns wide (narrower on a narrow terminal), on kitty-graphics terminals. JPEG, GIF and WebP are converted to PNG with `sips` on macOS or, failing it, ImageMagick's `magick` when installed; when neither converts the file, the row renders as Claude Code draws it. Other files and other tools render exactly what Claude Code draws.
 
 Inside herdr, run Claude Code with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`: herdr identifies as libghostty, and without the variable Claude Code draws only the alt text.
 

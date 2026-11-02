@@ -1,5 +1,6 @@
 import type { Register } from 'claude-code'
 
+import { convertedPng } from './convert'
 import { parsePng } from './png'
 
 // The ToolUse row is indented under its marker.
@@ -13,9 +14,10 @@ export const register: Register = on => {
     if (e.component !== 'ToolUse' || e.surface !== 'terminal' || e.props.isRunning || e.props.isErrored || e.props.isInterrupted === true) {
       return next(e)
     }
-    const png = e.props.tool === 'Read' ? parsePng(e.props.output, e.props.input) : undefined
     const ui = $.ui.resolve(e)
-    if (png === undefined || !('Image' in ui)) return next(e)
+    if (e.props.tool !== 'Read' || !('Image' in ui)) return next(e)
+    const png = parsePng(e.props.output, e.props.input) ?? (await convertedPng($, e.props.output, e.props.input))
+    if (png === undefined) return next(e)
 
     const { Box, Image } = ui
     const width = Math.min(IMAGE_WIDTH, (e.viewport?.columns ?? 100) - TOOL_INDENT)
