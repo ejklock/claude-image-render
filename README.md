@@ -2,7 +2,9 @@
 
 A Claude Code mod that draws the images Claude Code reads inline in the terminal transcript, using the mods API's `ui.Image` on terminals that speak the kitty graphics protocol (Ghostty, kitty, WezTerm).
 
-Status: walking skeleton. The plugin loads and its `ui.render` hook renders exactly what Claude Code draws; it draws no image yet.
+Status: PNG images that `Read` returns are drawn inline, under Claude Code's own `Read` row, sized to the terminal, on kitty-graphics terminals. Other files and other tools render exactly what Claude Code draws.
+
+Inside herdr, run Claude Code with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1`: herdr identifies as libghostty, and without the variable Claude Code draws only the alt text.
 
 Install: `/plugin install image-render --marketplace ejklock/claude-image-render`
 
