@@ -3,6 +3,7 @@
 ## Open
 
 * [0004 — The plugin is published as the public repository ejklock/claude-image-render with media of it working and release 0.1.0](0004-the-plugin-is-published-as-the-public-repository-ejklock-claude-image-render-with-media-of-it-working-and-release-0-1-0.md) - in-progress
+* [0005 — A Read folded into a tool group draws its picture under the group line](0005-a-read-folded-into-a-tool-group-draws-its-picture-under-the-group-line.md) - open
 
 ## Closed
 

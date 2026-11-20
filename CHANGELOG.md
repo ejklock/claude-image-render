@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Draw the pictures of a `Read` or MCP call that the transcript folds into a tool group line such as `Read 1 file`, under that line, in the order of the group's calls.
+
 ## 0.1.0
 
 - Draw the PNG that a `Read` returns inline under its tool row, at most 60 columns wide (narrower on a narrow or short terminal), on kitty-graphics terminals.

@@ -1320,3 +1320,124 @@ test('a PNG Read over 2 MiB whose path holds a glob character is never given to 
 
   expect(converterRuns(runs).map(argv => argv[0])).toEqual(['/usr/bin/sips'])
 })
+
+type GroupCall = {
+  tool: string
+  input: unknown
+  output?: unknown
+  isRunning?: boolean
+  isErrored?: boolean
+  isInterrupted?: boolean
+}
+
+type MountedGroup = {
+  surface?: 'terminal' | 'desktop'
+  isActive?: boolean
+  isExpanded?: boolean
+  calls: GroupCall[]
+}
+
+async function mountGroup($: Engine, on: Parameters<TestBody>[1], mounted: MountedGroup) {
+  on('ui.render', { component: 'ToolGroup' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text key="engine-group">engine group</Text>
+  })
+
+  return $.ui.mount({
+    plugin: 'image-render',
+    surface: mounted.surface ?? 'terminal',
+    component: 'ToolGroup',
+    props: {
+      calls: mounted.calls.map((call, index) => ({
+        tool_use_id: 'toolu_g' + String(index),
+        isRunning: false,
+        isErrored: false,
+        isInterrupted: false,
+        ...call,
+      })),
+      isActive: mounted.isActive ?? false,
+      isExpanded: mounted.isExpanded ?? false,
+    },
+    viewport: VIEWPORT,
+  } as never)
+}
+
+const pngRead = (base64: string, filePath = '/repo/shot.png', more: Partial<GroupCall> = {}): GroupCall => ({
+  tool: 'Read',
+  input: { file_path: filePath },
+  output: imageOutput(base64),
+  ...more,
+})
+const textRead: GroupCall = {
+  tool: 'Read',
+  input: { file_path: '/repo/notes.txt' },
+  output: { type: 'text', file: { filePath: '/repo/notes.txt', content: 'hello', numLines: 1, startLine: 1, totalLines: 1 } },
+}
+const grep: GroupCall = { tool: 'Grep', input: { pattern: 'x' }, output: { mode: 'content', numFiles: 0, filenames: [] } }
+
+for (const isActive of [true, false]) {
+  test('a folded group holding a finished PNG Read draws the picture under the group line, active ' + String(isActive), async ($, on) => {
+    const base64 = pngBase64(1600, 400)
+    const ui = await mountGroup($, on, { isActive, calls: [pngRead(base64)] })
+    const drawn = await drawnNodes(ui)
+
+    expect(drawn.map(node => node.type)).toEqual(['Text', 'Image'])
+    expect(drawn[0]).toMatchObject({ text: 'engine group' })
+    expect(drawn[1]?.props).toMatchObject({ source: { png: base64 }, columns: 60, rows: 8 })
+    expect(String(drawn[1]?.props.alt)).toContain('shot.png')
+  })
+}
+
+const undrawnGroups: Array<[string, MountedGroup]> = [
+  ['an expanded group', { isExpanded: true, calls: [pngRead(pngBase64(1600, 400))] }],
+  ['a group whose only image call is running', { calls: [pngRead(pngBase64(1600, 400), '/repo/shot.png', { isRunning: true })] }],
+  ['a group whose only image call errored', { calls: [pngRead(pngBase64(1600, 400), '/repo/shot.png', { isErrored: true })] }],
+  ['a group whose only image call was interrupted', { calls: [pngRead(pngBase64(1600, 400), '/repo/shot.png', { isInterrupted: true })] }],
+  ['a group of a text Read and a Grep', { calls: [textRead, grep] }],
+  ['a group with no calls', { calls: [] }],
+  ['a group on the desktop surface', { surface: 'desktop', calls: [pngRead(pngBase64(1600, 400))] }],
+]
+
+for (const [title, mounted] of undrawnGroups) {
+  test('a group renders only what the engine draws: ' + title, async ($, on) => {
+    const ui = await mountGroup($, on, mounted)
+    const drawn = await drawnNodes(ui)
+
+    expect(drawn).toHaveLength(1)
+    expect(drawn[0]).toMatchObject({ type: 'Text', text: 'engine group' })
+  })
+}
+
+test('a group of two PNG Reads around a Grep draws both pictures in call order', async ($, on) => {
+  const first = pngBase64(1600, 400)
+  const second = pngBase64(400, 1600)
+  const ui = await mountGroup($, on, { calls: [pngRead(first, '/repo/a.png'), grep, pngRead(second, '/repo/b.png')] })
+  const drawn = await drawnNodes(ui)
+
+  expect(drawn.map(node => node.type)).toEqual(['Text', 'Image', 'Image'])
+  expect(drawn[0]).toMatchObject({ text: 'engine group' })
+  expect(drawn[1]?.props).toMatchObject({ source: { png: first }, columns: 60, rows: 8 })
+  expect(String(drawn[1]?.props.alt)).toContain('a.png')
+  expect(drawn[2]?.props).toMatchObject({ source: { png: second }, columns: 16, rows: 32 })
+  expect(String(drawn[2]?.props.alt)).toContain('b.png')
+})
+
+test('a group skips an errored image call and draws only the finished one after it', async ($, on) => {
+  const failed = pngBase64(1600, 400)
+  const finished = pngBase64(400, 1600)
+  const ui = await mountGroup($, on, { calls: [pngRead(failed, '/repo/a.png', { isErrored: true }), pngRead(finished, '/repo/b.png')] })
+  const images = await ui.findAll({ type: 'Image' })
+
+  expect(images.map(node => node.props.source)).toEqual([{ png: finished }])
+})
+
+test('an MCP call in a folded group draws its PNG block under the group line', async ($, on) => {
+  const base64 = pngBase64(1600, 400)
+  const output = [textBlock('shot'), imageBlock(base64)]
+  const ui = await mountGroup($, on, { calls: [{ tool: MCP_TOOL, input: {}, output }] })
+  const drawn = await drawnNodes(ui)
+
+  expect(drawn.map(node => node.type)).toEqual(['Text', 'Image'])
+  expect(drawn[1]?.props).toMatchObject({ source: { png: base64 }, columns: 60, rows: 8 })
+  expect(String(drawn[1]?.props.alt)).toContain(MCP_TOOL)
+})
