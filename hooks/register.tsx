@@ -12,14 +12,22 @@ const TOOL_INDENT = 7
 // A fixed width keeps the transcript readable: a full-width picture dwarfs the text around it.
 const IMAGE_WIDTH = 60
 
+type Finishable = { isRunning: boolean; isErrored: boolean; isInterrupted?: boolean }
+
+const isFinished = (call: Finishable) => !call.isRunning && !call.isErrored && call.isInterrupted !== true
+
 export const register: Register = on => {
   on('ui.render', async ($, e, next) => {
-    if (e.component !== 'ToolUse' || e.surface !== 'terminal' || e.props.isRunning || e.props.isErrored || e.props.isInterrupted === true) {
-      return next(e)
-    }
+    if (e.surface !== 'terminal') return next(e)
+    let source: Array<{ tool: string; input: unknown; output?: unknown }>
+    if (e.component === 'ToolUse') source = isFinished(e.props) ? [e.props] : []
+    else if (e.component === 'ToolGroup' && !e.props.isExpanded) source = e.props.calls.filter(isFinished)
+    else return next(e)
+
     const ui = $.ui.resolve(e)
     if (!('Image' in ui)) return next(e)
-    const pngs = await drawablePngs($, e.props)
+    const pngs: Png[] = []
+    for (const call of source) pngs.push(...(await drawablePngs($, call)))
     if (pngs.length === 0) return next(e)
 
     const { Box, Image } = ui

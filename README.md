@@ -96,7 +96,9 @@ A JPEG that `Read` returned:
 The plugin is a Claude Code mods hook module
 ([hooks/register.tsx](hooks/register.tsx)). It hooks `ui.render` for
 `ToolUse`, and for a finished `Read` or MCP call that yields a picture it
-renders the engine's own row followed by a `ui.Image` of the PNG bytes.
+renders the engine's own row followed by a `ui.Image` of the PNG bytes. A call
+that the transcript folds into a `ToolGroup` count line (`Read 1 file`) draws
+its picture under that line instead; an expanded group is left to its rows.
 
 ## Development
 
