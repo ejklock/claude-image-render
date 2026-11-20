@@ -1,6 +1,6 @@
 {
   "name": "claude-image-render",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Draws the images Claude Code reads inline in the terminal.",
   "private": true,
   "type": "module",
